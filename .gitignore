@@ -2,3 +2,4 @@ environment.yml
 .ipynb_checkpoints
 Euler/
 Leetcode.ipynb
+__pycache__
