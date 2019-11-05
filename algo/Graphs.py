@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-#T1.0 Create the graph dictionary
+
+#T1.0 Create the graph dictionary: non-weighted dictionary from a list of edges (as sublists of 2 nodes)
 def graph(lst):
+    """Create the graph dictionary: non-weighted dictionary from a list of edges 
+    (as sublists of 2 nodes)"""
     graph_dict = {}
     for sublist in lst:
         if not sublist[0] in graph_dict.keys():
@@ -15,7 +18,7 @@ def graph(lst):
             graph_dict[sublist[1]].append(sublist[0])    
     return graph_dict
 
-#T1.0 Alternative
+#T1.0 Alternative to create a graph dictionary (cleaner, but the dictionary is not sorted, do not use in debug mode)
 def make_graph(lst):
     graph_keys = list(set([x for sublist in lst for x in sublist]))
     graph_dict = {}
@@ -167,6 +170,10 @@ def a_star_search(start):
                 visited.append(child)
                 parent[child.data] = current.data
     return find_path(parent, current.data)
+
+def str_to_list(s) :
+    #takes a string of ints and returns the list
+    return [ int(i) for i in s.split() ]
 
 
 
