@@ -6,6 +6,7 @@ class Map:
     def __init__(self, density = 3):
         self.density = density / 9
         self.grid = self.draw_islands()
+        self.islands = np.argwhere(self.grid=='I').tolist()
 
     def draw_islands(self):
         # create grid with n random obstacles distributed around the center of the grid squares
@@ -18,6 +19,20 @@ class Map:
         grid = np.concatenate((grid, np.concatenate((subs[4],subs[4],subs[6]), axis=1)),axis=0)
         grid = np.concatenate((grid, np.concatenate((subs[7],subs[8],subs[9]), axis=1)),axis=0)
         return grid
+    
+    def initial_position(self, coord = []):
+        '''at the start of the game, the captain places the boat on the location of his choice on the map (not on an island)
+        define empty initial coordinates to allow for a manual choice - only check that it's not on an island.
+        '''
+        np.place(self.grid, self.grid!='I', '') # erase anything that isn't an island - reset the map from a previous game
+        available_positions = np.argwhere(self.grid=='') # returns an array of coordinate tuples of all cells that are not 'taken' (island or mine)
+        if coord:
+            if not coord in available_positions:
+                print('You cannot place the boat on an island or outside the map')
+        else:
+            coord = random.choice(available_positions) # select a cell randomly within the above array
+        self.grid[coord[0], coord[1]] = 'X' # mark with a X the current location in the grid
+        return coord
     
 class Boat:
     def __init__(self, team):
@@ -44,23 +59,10 @@ class Captain:
     def __init__(self,team, raw_map, coord = []):
         self.team = team
         self.map = raw_map.grid
-        self.x0, self.y0 = self.initial_position(coord)
+        self.islands = raw_map.islands
+        self.x0, self.y0 = raw_map.initial_position(coord)
         self.x, self.y = self._current_position()
         print('Coordinates:', self.x, self.y)
-
-    def initial_position(self, coord = []):
-        '''at the start of the game, the captain places the boat on the location of his choice on the map (not on an island)
-        define empty initial coordinates to allow for a manual choice - only check that it's not on an island.
-        '''
-        np.place(self.map, self.map!='I', '') # erase anything that isn't an island - reset the map from a previous game
-        available_positions = np.argwhere(self.map=='') # returns an array of coordinate tuples of all cells that are not 'taken' (island or mine)
-        if coord:
-            if not coord in available_positions:
-                print('You cannot place the boat on an island or outside the map')
-        else:
-            coord = random.choice(available_positions) # select a cell randomly within the above array
-        self.map[coord[0], coord[1]] = 'X' # mark with a X the current location in the grid
-        return coord
 
     def _current_position(self):
         return np.argwhere(self.map == 'X')[0]
@@ -194,7 +196,7 @@ class Captain:
         # remove impact points outside the map
         pos_radiation_zone = [k for k in radiation_zone.tolist() if (k[0] >= 0) & (k[1] >= 0)]
         # remove islands from possible impact locations
-        free_radiation_zone = [k for k in pos_radiation_zone if not k in np.argwhere(grid =='I').tolist()]
+        free_radiation_zone = [k for k in pos_radiation_zone if not k in self.islands]
         # select a point of impact at random
         return self._place_torpedo(free_radiation_zone)
     
@@ -203,9 +205,16 @@ class Captain:
 
 class Radio:
     
-    def __init__(self):
-        pass
+    def __init__(self, team, raw_map, coord=[]):
+        self.team = team
+        self.raw_map = raw_map
+        self.map = raw_map.grid
+        self.islands = raw_map.islands
+
+    def guess_initial_position_enemy(self, coord=[]):
+        return self.raw_map.initial_position(coord)
 
     def draw_enemy_map(self, direction):
-        return [0]
+        init = self.guess_initial_position_enemy()
+        return [[0,0]]
 
