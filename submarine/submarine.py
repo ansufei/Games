@@ -200,3 +200,12 @@ class Captain:
     
     def drop_mine(self):
         pass
+
+class Radio:
+    
+    def __init__(self):
+        pass
+
+    def draw_enemy_map(self, direction):
+        return [0]
+
