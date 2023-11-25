@@ -1,6 +1,8 @@
 import numpy as np
 import random
 import math
+import shapely
+import csv
 
 class Map:
     def __init__(self, density = 3):
@@ -37,9 +39,22 @@ class Map:
 class Boat:
     def __init__(self, team):
         self.damages = 0
+        self.shape = self.geojson_boat()
+
+    def geojson_boat(self):
+        pass
 
     def draw_outline(self):
-        pass
+        with open('boat_outline.csv', newline='') as csvfile:
+            boat_outline = csv.reader(csvfile)
+            polygons = {str(k):[] for k in range(1,6)}
+            next(boat_outline)
+            for row in boat_outline:
+                polygons[row[0]].append((row[1],row[2]))
+            polygons = {k:shapely.Polygon(polygons[k]) for k in polygons.keys()}
+            outline_geo = shapely.MultiPolygon(polygons.values())
+        return outline_geo
+
 
 class Captain:
     '''
