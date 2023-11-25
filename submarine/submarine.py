@@ -36,15 +36,30 @@ class Map:
         self.grid[coord[0], coord[1]] = 'X' # mark with a X the current location in the grid
         return coord
     
+    def next_move(self, x, y, direction):
+        '''calculate the next coordinates'''
+        directions = {'HEAD NORTH': (-1,0), 'HEAD SOUTH': (1,0), 'HEAD WEST': (0,-1), 'HEAD EAST': (0,1)}
+        return tuple(map(sum, zip((x,y), directions[direction])))
+    
+    def confirm_allowed_move(self, x, y, direction):
+        '''check that the proposed coordinates are allowed'''
+        new_x, new_y = self.next_move(x, y, direction)
+        # error message if boat on the edge of the map
+        if new_x < 0 or new_y < 0 or new_x > len(self.grid)-1 or new_y > len(self.grid)-1:
+            return False
+        # check that the proposed coordinates are free from obstacle
+        if self.grid[new_x, new_y] == '':
+            return (new_x, new_y)
+        else:
+            return False
+        
+    
 class Boat:
     def __init__(self, team):
         self.damages = 0
         self.shape = self.geojson_boat()
 
     def geojson_boat(self):
-        pass
-
-    def draw_outline(self):
         with open('boat_outline.csv', newline='') as csvfile:
             boat_outline = csv.reader(csvfile)
             polygons = {str(k):[] for k in range(1,6)}
@@ -54,6 +69,9 @@ class Boat:
             polygons = {k:shapely.Polygon(polygons[k]) for k in polygons.keys()}
             outline_geo = shapely.MultiPolygon(polygons.values())
         return outline_geo
+
+    def draw_outline(self):
+        pass
 
 
 class Captain:
@@ -73,7 +91,8 @@ class Captain:
 
     def __init__(self,team, raw_map, coord = []):
         self.team = team
-        self.map = raw_map.grid
+        self.raw_map = raw_map
+        self.map = self.raw_map.grid
         self.islands = raw_map.islands
         self.x0, self.y0 = raw_map.initial_position(coord)
         self.x, self.y = self._current_position()
@@ -82,35 +101,33 @@ class Captain:
     def _current_position(self):
         return np.argwhere(self.map == 'X')[0]
 
-    def order_move(self, direction):
+    def order_move(self):
         '''Position the X one cell adjacent to the previous one in the direction given.
-        If the boat is already on the edge of the map, or if the move would run the boat into an island, a mine or its previous route, abort and print an error'''
+        If the boat is already on the edge of the map, or if the move would run the boat into an island, 
+        a mine or its previous route, abort and print an error'''
         # initialize position to current position
         x = self.x
         y = self.y
-        # calculate propose coordinates with a move of one cell in the given direction
-        if direction == 'HEAD NORTH' and x > 0:
-            x -= 1
-        elif direction == 'HEAD SOUTH' and x < len(self.map) - 1:
-            x += 1
-        elif direction == 'HEAD WEST' and y > 0:
-            y -= 1
-        elif direction == 'HEAD EAST' and y < len(self.map) - 1:
-            y += 1
-        # error message if boat on the edge of the map
-        else:
-            print('Team {}: The move {} is not allowed as the boat is on the edge of the map'.format(self.team, direction))
-            return self.map
-        # check that the proposed coordinates are free from obstacle
-        if self.map[x,y] == '':
-            print('Team {} : {}'.format(self.team, direction))
-            # change symbol for last position that is now part of the route
-            self.map[self.x,self.y] = '-'
-            # assign symbol X to new current position
-            self.map[x,y] = 'X'
-            self.x, self.y = (x, y)
-        else:
-            print('Team {}: The move {} is not allowed as there is an obstacle on the way'.format(self.team, direction))
+        # set up a counter to stop attempts in case the boat has no choice but to resurface
+        counter = 0  
+        while counter < 4: 
+            # randomly select a direction and check if allowed
+            pos_directions = ['HEAD NORTH', 'HEAD SOUTH', 'HEAD WEST', 'HEAD EAST']
+            picked = []
+            direction = random.choice([x for x in pos_directions if not x in picked])
+            next_move = self.raw_map.confirm_allowed_move(x, y, direction)
+            if next_move:
+                print('Team {} : {}'.format(self.team, direction))
+                # change symbol for last position that is now part of the route
+                self.map[self.x,self.y] = '-'
+                # assign symbol X to new current position
+                x, y = next_move
+                self.map[x,y] = 'X'
+                self.x, self.y = (x, y)
+                return self.map
+            counter += 1
+            picked.append(direction)
+        print('Team {}: RESURFACE'.format(self.team))
         return self.map
 
     def order_surface(self):
@@ -219,17 +236,18 @@ class Captain:
         pass
 
 class Radio:
-    
-    def __init__(self, team, raw_map, coord=[]):
+    def __init__(self, team, raw_map):
         self.team = team
         self.raw_map = raw_map
         self.map = raw_map.grid
         self.islands = raw_map.islands
+        self.init = self.guess_initial_position_enemy()
 
-    def guess_initial_position_enemy(self, coord=[]):
-        return self.raw_map.initial_position(coord)
+    def guess_initial_position_enemy(self):
+        return self.raw_map.initial_position()
 
-    def draw_enemy_map(self, direction):
-        init = self.guess_initial_position_enemy()
+    def draw_enemy_move(self, enemy_order):
         return [[0,0]]
+
+
 
