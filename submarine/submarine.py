@@ -4,11 +4,12 @@ import math
 import shapely
 import csv
 
-class Map:
+class Game:
     def __init__(self, density = 3):
         self.density = density / 9
         self.grid = self.draw_islands()
         self.islands = np.argwhere(self.grid=='I').tolist()
+        self.orders = {'A':[], 'B':[]}
 
     def draw_islands(self):
         # create grid with n random obstacles distributed around the center of the grid squares
@@ -55,7 +56,8 @@ class Map:
         
     
 class Boat:
-    def __init__(self, team):
+    def __init__(self, game, team):
+        self.game = game
         self.damages = 0
         self.shape = self.geojson_boat()
 
@@ -74,6 +76,29 @@ class Boat:
         pass
 
 
+class Radio:
+    def __init__(self, game, team):
+        self.game = game
+        self.team = team
+        self.map = game.grid
+        self.islands = game.islands
+        self.init = self.guess_initial_position_enemy()
+        self.enemy_team = ['A','B'][1-['A','B'].index(self.team)]
+
+    def set_enemy_move(self):
+        self.enemy_move = self.game.orders[self.enemy_team].pop(0)
+        print(self.enemy_move)
+    
+    def listen_enemy_move(self):
+        self.point_to_A.transmit(self.enemy_move) 
+
+    def guess_initial_position_enemy(self):
+        return self.game.initial_position()
+
+    def draw_enemy_move(self):
+        pass
+    
+
 class Captain:
     '''
     - DONE Decides of the initial position of the boat
@@ -89,17 +114,20 @@ class Captain:
     - DONE gives approximate position in case of a sonar attack by the enemy
     '''
 
-    def __init__(self,team, raw_map, coord = []):
+    def __init__(self, game, team, coord = []):
+        self.game = game
         self.team = team
-        self.raw_map = raw_map
-        self.map = self.raw_map.grid
-        self.islands = raw_map.islands
-        self.x0, self.y0 = raw_map.initial_position(coord)
+        self.map = game.grid
+        self.islands = game.islands
+        self.x0, self.y0 = game.initial_position(coord)
         self.x, self.y = self._current_position()
-        print('Coordinates:', self.x, self.y)
+        self.latest_direction = None
 
     def _current_position(self):
         return np.argwhere(self.map == 'X')[0]
+    
+    def transmit(self, direction):
+        self.game.orders[self.team].append(direction)
 
     def order_move(self):
         '''Position the X one cell adjacent to the previous one in the direction given.
@@ -115,11 +143,13 @@ class Captain:
             pos_directions = ['HEAD NORTH', 'HEAD SOUTH', 'HEAD WEST', 'HEAD EAST']
             picked = []
             direction = random.choice([x for x in pos_directions if not x in picked])
-            next_move = self.raw_map.confirm_allowed_move(x, y, direction)
+            next_move = self.game.confirm_allowed_move(x, y, direction)
             if next_move:
                 print('Team {} : {}'.format(self.team, direction))
+                self.transmit(direction)
                 # change symbol for last position that is now part of the route
                 self.map[self.x,self.y] = '-'
+                # TO DO: check for mines
                 # assign symbol X to new current position
                 x, y = next_move
                 self.map[x,y] = 'X'
@@ -127,7 +157,8 @@ class Captain:
                 return self.map
             counter += 1
             picked.append(direction)
-        print('Team {}: RESURFACE'.format(self.team))
+        # if none of the directions can be chosen, resurface
+        self.order_surface()
         return self.map
 
     def order_surface(self):
@@ -138,13 +169,17 @@ class Captain:
         - announcing the current sector to the enemy
         - completing the outline of the boat
         - waiting for feedback to resume dive'''
-        print('Team {}: SURFACE'.format(self.team))
+        print('Team {}: RESURFACE'.format(self.team))
+        self.transmit('RESURFACE')
+        # TO DO deal with resurfacing
         # reset the route
         self._erase_route_after_surface()
         # announce the current sector to the enemy
         print('Team {}: ATTENTION, WE ARE SURFACING IN SECTOR {}'.format(self.team, self.give_sector()))
+        self.transmit('ATTENTION, WE ARE SURFACING IN SECTOR {}'.format(self.give_sector()))
         # TO DO complete the outline of the boat
         print('Team {}: DIVE'.format(self.team))
+        self.transmit('DIVE')
         return self.map
 
     def _erase_route_after_surface(self):
@@ -189,6 +224,7 @@ class Captain:
         wrong_first = wrong_coord, wrong
         first, second = np.random.permutation((correct_first, wrong_first))
         print('Team {} : WE ARE IN {}, {}'.format(self.team, ', '.join(first), ', '.join(second)))
+        self.transmit('WE ARE IN {}, {}'.format(', '.join(first), ', '.join(second)))
         return self.map
                     
                     
@@ -214,6 +250,7 @@ class Captain:
         impact_x, impact_y = path.pop()
         self.map[impact_x,impact_y] = 'T'
         print('Team {} : TORPEDO LAUNCHED, IMPACT IN {}-{}'.format(self.team, impact_x, impact_y))
+        self.transmit('TORPEDO LAUNCHED, IMPACT IN {}-{}'.format(impact_x, impact_y))
         return self.map
 
     def launch_torpedo(self):
@@ -223,6 +260,7 @@ class Captain:
         If a mine is in the impact zone, it will be destroyed
         If the boat launching the torpedo is in the impact zone, it will be impacted'''
         print('Team {}: I\'M LAUNCHING A TORPEDO'.format(self.team))
+        self.transmit('I\'M LAUNCHING A TORPEDO')
         # define a diamond shape of max distance 4 from current location
         radiation_zone = np.array([self.x,self.y]) + [(x,y) for x in range(-4,5) for y in range(-4,5) if abs(x) + abs(y) <= 4]
         # remove impact points outside the map
@@ -234,20 +272,5 @@ class Captain:
     
     def drop_mine(self):
         pass
-
-class Radio:
-    def __init__(self, team, raw_map):
-        self.team = team
-        self.raw_map = raw_map
-        self.map = raw_map.grid
-        self.islands = raw_map.islands
-        self.init = self.guess_initial_position_enemy()
-
-    def guess_initial_position_enemy(self):
-        return self.raw_map.initial_position()
-
-    def draw_enemy_move(self, enemy_order):
-        return [[0,0]]
-
 
 
