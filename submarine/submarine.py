@@ -4,13 +4,15 @@ import math
 import shapely
 import csv
 
+directions = {'HEAD NORTH': (-1,0), 'HEAD SOUTH': (1,0), 'HEAD WEST': (0,-1), 'HEAD EAST': (0,1)}
+
 class Game:
     def __init__(self, density = 3):
         self.density = density / 9
         self.grid = self.draw_islands()
         self.islands = np.argwhere(self.grid=='I').tolist()
         self.orders = {'A':[], 'B':[]}
-
+    
     def draw_islands(self):
         # create grid with n random obstacles distributed around the center of the grid squares
         subs = {key : None for key in range(1,10)} # dictionary of sectors
@@ -34,22 +36,20 @@ class Game:
                 print('You cannot place the boat on an island or outside the map')
         else:
             coord = random.choice(available_positions) # select a cell randomly within the above array
-        self.grid[coord[0], coord[1]] = 'X' # mark with a X the current location in the grid
         return coord
     
     def next_move(self, x, y, direction):
         '''calculate the next coordinates'''
-        directions = {'HEAD NORTH': (-1,0), 'HEAD SOUTH': (1,0), 'HEAD WEST': (0,-1), 'HEAD EAST': (0,1)}
         return tuple(map(sum, zip((x,y), directions[direction])))
     
-    def confirm_allowed_move(self, x, y, direction):
+    def confirm_allowed_move(self, x, y, direction, naval_map):
         '''check that the proposed coordinates are allowed'''
         new_x, new_y = self.next_move(x, y, direction)
         # error message if boat on the edge of the map
-        if new_x < 0 or new_y < 0 or new_x > len(self.grid)-1 or new_y > len(self.grid)-1:
+        if new_x < 0 or new_y < 0 or new_x > len(naval_map)-1 or new_y > len(naval_map)-1:
             return False
         # check that the proposed coordinates are free from obstacle
-        if self.grid[new_x, new_y] == '':
+        if naval_map[new_x, new_y] == '':
             return (new_x, new_y)
         else:
             return False
@@ -80,23 +80,73 @@ class Radio:
     def __init__(self, game, team):
         self.game = game
         self.team = team
-        self.map = game.grid
-        self.islands = game.islands
-        self.init = self.guess_initial_position_enemy()
+        self.enemy_map = self._draw_map()
         self.enemy_team = ['A','B'][1-['A','B'].index(self.team)]
+        self.list_enemy_orders = []
+        self.list_tried_start_positions = []
+        self.x0, self.y0 = self.initial_position_enemy()
+        self.x, self.y = self._guessed_current_position()
 
-    def set_enemy_move(self):
-        self.enemy_move = self.game.orders[self.enemy_team].pop(0)
-        print(self.enemy_move)
+    def _draw_map(self):
+        naval_map = np.full((15,15),fill_value='')
+        for island in self.game.islands:
+            naval_map[island[0],island[1]] = 'I'
+        return naval_map
+
+    def initial_position_enemy(self):
+        coordinates = self.game.initial_position()
+        self.enemy_map[coordinates[0], coordinates[1]] = 'X' # mark with a X the current location in the grid
+        self.list_tried_start_positions.append(coordinates)
+        return coordinates
+    
+    def _guessed_current_position(self):
+        return np.argwhere(self.enemy_map == 'X')[0]
     
     def listen_enemy_move(self):
-        self.point_to_A.transmit(self.enemy_move) 
-
-    def guess_initial_position_enemy(self):
-        return self.game.initial_position()
+        direction_moves = [x for x in self.game.orders[self.enemy_team] if x in directions.keys()]
+        if len(direction_moves) > 0:
+            return direction_moves.pop(0)
+        return False
 
     def draw_enemy_move(self):
-        pass
+        enemy_order = self.listen_enemy_move()
+        if enemy_order:
+            self.list_enemy_orders.append(enemy_order)
+            guessed_move = self.game.confirm_allowed_move(self.x, self.y, enemy_order, self.enemy_map)
+            print(guessed_move, self.x, self.y, enemy_order)
+            if guessed_move:
+                # change symbol for last position that is now part of the route
+                self.enemy_map[self.x,self.y] = '-'
+                # assign symbol X to new current position
+                x, y = guessed_move
+                self.enemy_map[x,y] = 'X'
+                self.x, self.y = (x, y)
+                return self.enemy_map
+            else:
+                while True:
+                    new_guessed_initial_position = self.possible_initial_positions()
+                    print(new_guessed_initial_position)
+                    self.list_tried_start_positions.append(new_guessed_initial_position)
+                    break
+        return self.enemy_map
+    
+    def possible_initial_positions(self):
+        '''the enemy boat can be anywhere on the map, except on an island or on a cell that has already been tried'''
+        available_positions = np.argwhere(self.enemy_map=='')
+        print('available_positions',available_positions)
+        print('list_tried_start_positions', self.list_tried_start_positions)
+        available_positions = available_positions.remove(self.list_tried_start_positions)
+        # reduce the list of possible positions if we already have information on the itinerary
+        if self.list_enemy_orders:
+            # frame past itinerary into a rectangle
+            min_x, min_y = np.min(np.argwhere(self.enemy_map == '-'), axis=0)
+            max_x, max_y = np.max(np.argwhere(self.enemy_map == '-'), axis=0)
+            rect_journey = np.array([[min_x, min_y], [min_x, max_y], [max_x, max_y], [max_x, min_y]])
+            # limit the list of possible positions so that the itinerary would fit inside the dimensions of the rectangle
+            available_positions = [x for x in available_positions if shapely.geometry.Point(x).within(shapely.geometry.Polygon(rect_journey))]
+            print(available_positions)
+        return random.choice(available_positions)
+    
     
 
 class Captain:
@@ -115,14 +165,25 @@ class Captain:
     '''
 
     def __init__(self, game, team, coord = []):
+        self.map = np.full((15,15),fill_value='')
         self.game = game
         self.team = team
-        self.map = game.grid
-        self.islands = game.islands
-        self.x0, self.y0 = game.initial_position(coord)
+        self.map = self._draw_map()
+        self.x0, self.y0 = self.initial_position(coord = [])
         self.x, self.y = self._current_position()
         self.latest_direction = None
 
+    def _draw_map(self):
+        naval_map = np.full((15,15),fill_value='')
+        for island in self.game.islands:
+            naval_map[island[0],island[1]] = 'I'
+        return naval_map
+
+    def initial_position(self, coord = []):
+        coordinates = self.game.initial_position(coord = [])
+        self.map[coordinates[0], coordinates[1]] = 'X' # mark with a X the current location in the grid
+        return coordinates
+    
     def _current_position(self):
         return np.argwhere(self.map == 'X')[0]
     
@@ -133,17 +194,13 @@ class Captain:
         '''Position the X one cell adjacent to the previous one in the direction given.
         If the boat is already on the edge of the map, or if the move would run the boat into an island, 
         a mine or its previous route, abort and print an error'''
-        # initialize position to current position
-        x = self.x
-        y = self.y
         # set up a counter to stop attempts in case the boat has no choice but to resurface
         counter = 0  
         while counter < 4: 
             # randomly select a direction and check if allowed
-            pos_directions = ['HEAD NORTH', 'HEAD SOUTH', 'HEAD WEST', 'HEAD EAST']
             picked = []
-            direction = random.choice([x for x in pos_directions if not x in picked])
-            next_move = self.game.confirm_allowed_move(x, y, direction)
+            direction = random.choice([x for x in directions.keys() if not x in picked])
+            next_move = self.game.confirm_allowed_move(self.x, self.y, direction, self.map)
             if next_move:
                 print('Team {} : {}'.format(self.team, direction))
                 self.transmit(direction)
@@ -151,9 +208,9 @@ class Captain:
                 self.map[self.x,self.y] = '-'
                 # TO DO: check for mines
                 # assign symbol X to new current position
-                x, y = next_move
-                self.map[x,y] = 'X'
-                self.x, self.y = (x, y)
+                self.x, self.y = next_move
+                self.map[self.x,self.y] = 'X'
+                #self.x, self.y = (x, y)
                 return self.map
             counter += 1
             picked.append(direction)
